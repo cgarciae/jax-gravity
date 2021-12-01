@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "jax-gravity"
+version = "0.1.0"
+description = ""
+authors = ["Cristian Garcia <cgarcia.e88@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+matplotlib = "^3.5.0"
+jupyterlab = "^3.2.4"
+jax = "^0.2.25"
+jaxlib = "^0.1.74"
+
+[tool.poetry.dev-dependencies]
+black = {version = "^21.11b1", allow-prereleases = true}
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

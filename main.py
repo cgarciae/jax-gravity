@@ -125,4 +125,4 @@ anim = animation.FuncAnimation(
 plt.show()
 
 print("Saving animation...")
-anim.save("animation.mp4", writer="ffmpeg")
+anim.save("animation.gif", writer="ffmpeg")

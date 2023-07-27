@@ -244,4 +244,4 @@ anim = animation.FuncAnimation(
 plt.show()
 
 print("Saving animation...")
-anim.save("animation_toroidal.mp4", writer="ffmpeg")
+anim.save("animation_toroidal.gif", writer="ffmpeg")

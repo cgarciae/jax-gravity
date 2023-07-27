@@ -1,10 +1,7 @@
 # JAX Gravity
 This repo contains a demo of how to use JAX to create a simple gravity simulation. The script `main.py` uses JAX's experimental `ode` package to solve the differential equation.
 
-<video controls autoplay muted>
-  <source src="https://raw.githubusercontent.com/cgarciae/jax-gravity/main/animation.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+![animation](animation.gif)
 
 One cool thing about this demo is that it creates a function called `gravity` that only calculates the force between two bodies, and then uses `jax.vmap` twice to transform it into a function that calculates the force between all pairs of bodies.
 
@@ -13,10 +10,7 @@ Additionally, the script `main_toroidal.py` implements a gravitational simulatio
 A toroidal topology can be represented by tessellating a rectangle into an infinite plane and then using [periodic boundary conditions](https://hal.science/hal-00136101v2/). Here we approximate the space by using a finite number of replicas.
 
 
-<video controls autoplay muted>
-  <source src="https://raw.githubusercontent.com/cgarciae/jax-gravity/main/animation_toroidal.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+![animation_toroidal](animation_toroidal.gif)
 
 In this simulation we only use a grid of 3x3 replicas as its faster to compute, and the results are more satisfying to watch.
 To perform the simulation we use [diffrax](https://github.com/patrick-kidger/diffrax).

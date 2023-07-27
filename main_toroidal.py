@@ -21,21 +21,23 @@ jax.config.update("jax_enable_x64", True)
 A = TypeVar("A")
 
 # RNG keys
-seed = jax.random.PRNGKey(42)
+seed = jax.random.PRNGKey(2)
 kx, kv, km = jax.random.split(seed, 3)
 
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 12
+months = 15
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
 L: float = 4 * 748e7
+grid_radius = 1
+plot_field = False
 
 # Initial Values
-X0 = jax.random.uniform(kx, shape=(N_BODIES, 3), minval=-L / 2, maxval=L / 2)
+X0 = jax.random.uniform(kx, shape=(N_BODIES, 3), minval=L / 4, maxval=L * 3 / 4)
 V0 = jax.random.uniform(kv, shape=(N_BODIES, 3), minval=-1e5, maxval=1e5)
 M = jax.random.uniform(km, shape=(N_BODIES, 1), minval=5.972e27, maxval=1.898e30)
 # ignore z-axis
@@ -44,6 +46,16 @@ V0 = V0.at[:, 2].set(0.0)
 
 # system state
 Y = (X0, V0)
+
+# -----------------------------------------------
+# Utils
+# -----------------------------------------------
+
+
+def clip_by_norm(x, norm):
+    x_norm = jnp.linalg.norm(x, axis=-1, ord=2, keepdims=True)
+    clipped_x = jnp.where(x_norm > norm, x / x_norm * norm, x)
+    return clipped_x
 
 
 # -----------------------------------------------
@@ -63,39 +75,37 @@ def gravity(
 ) -> jnp.ndarray:
     radius3 = jnp.linalg.norm(xb - xa) ** 3
     f = G * ma * mb * (xb - xa) / radius3
-
     # fill nan values with 0s
-    return jnp.nan_to_num(f)
+    f = jnp.nan_to_num(f)
+    f = clip_by_norm(f, 1e40)
+    return f
 
 
 # -----------------------------------------------
 # Toroidal Topology
 # -----------------------------------------------
-def virtual_particles(X, M):
-    right = X + jnp.array([L, 0.0, 0.0])
-    right_up = X + jnp.array([L, L, 0.0])
-    up = X + jnp.array([0.0, L, 0.0])
-    left_up = X + jnp.array([-L, L, 0.0])
-    left = X + jnp.array([-L, 0.0, 0.0])
-    left_down = X + jnp.array([-L, -L, 0.0])
-    down = X + jnp.array([0.0, -L, 0.0])
-    right_down = X + jnp.array([L, -L, 0.0])
+def virtual_particles(X, M, R: int):
+    space = jnp.linspace(-L * R, L * R, 2 * R + 1)
+    xx, yy = jnp.meshgrid(space, space)
+    zz = jnp.zeros_like(xx)
+    Xgrid = jnp.stack([xx, yy, zz], axis=-1).reshape(-1, 3)
 
-    X = jnp.concatenate(
-        [X, right, right_up, up, left_up, left, left_down, down, right_down]
-    )
-    M = jnp.concatenate([M] * 9)
+    X = X[None] + Xgrid[:, None]
+    X = X.reshape(-1, 3)
+
+    M = jnp.concatenate([M] * (2 * R + 1) ** 2)
 
     return X, M
 
 
 def boundary_conditions(Y) -> Any:
     X, V = Y
-    X = jnp.mod(X, L)
+    X = jnp.mod(X, L)  # toroidal topology
+    V = clip_by_norm(V, 1e6)  # clip velocity
     return X, V
 
 
-def gravitation_field(x, m, n):
+def gravitation_field(x, m, n, grid_radius):
     m0 = m
     x = x[None]
     m = m[None]
@@ -105,7 +115,7 @@ def gravitation_field(x, m, n):
     Xgrid = jnp.stack([xx, yy, jnp.zeros_like(xx)], axis=-1).reshape(-1, 3)
     Mgrid = jnp.full(Xgrid.shape[0:1], m0)
 
-    x, m = virtual_particles(x, m)
+    x, m = virtual_particles(x, m, grid_radius)
 
     F = gravity(Xgrid, Mgrid, x, m).sum(axis=1)
     # add field from virtual particles
@@ -117,22 +127,27 @@ def gravitation_field(x, m, n):
 
 
 # plot gravitational field
-x_test = jnp.array([L / 4, L / 4, 0.0])
-m_test = jnp.array([1e30])
+if plot_field:
+    x_test = jnp.array([L / 4, L / 4, 0.0])
+    m_test = jnp.array([1e30])
 
-xx, yy, F = gravitation_field(x_test, m_test, n=61)
+    xx, yy, F = gravitation_field(x_test, m_test, n=45, grid_radius=200)
 
-# quiver plot
-fig, ax = plt.subplots(figsize=(10, 10))
-exp = 1.1
-Fnorm = F / jnp.linalg.norm(F, axis=-1, ord=2, keepdims=True)
-F = np.sign(F) * (np.abs(F) ** 0.2)
-ax.quiver(xx, yy, F[..., 0], F[..., 1])
-ax.set_xlim(0, L)
-ax.set_ylim(0, L)
-plt.show()
+    fig, ax = plt.subplots(figsize=(10, 10))
+    # plot stable points
+    plt.scatter(
+        [L / 4, L / 4, L * 3 / 4, L * 3 / 4],
+        [L / 4, L * 3 / 4, L / 4, L * 3 / 4],
+        c="b",
+    )
+    # plot field
+    Fnorm = F / jnp.linalg.norm(F, axis=-1, ord=2, keepdims=True)
+    F = np.sign(F) * (np.abs(F) ** 0.22)
+    ax.quiver(xx, yy, F[..., 0], F[..., 1], minlength=0.2, width=0.0015)
+    ax.set_xlim(0, L)
+    ax.set_ylim(0, L)
 
-exit()
+    fig.savefig("toroidal_gravitation_field.png")
 
 
 # -----------------------------------------------
@@ -143,7 +158,7 @@ exit()
 # is just the velocity (dX). Notice how the state is conveniently a pytree tuple :)
 def dY(t, Y, args):
     X, V = Y
-    Xv, Mv = virtual_particles(X, M)
+    Xv, Mv = virtual_particles(X, M, grid_radius)
     F = gravity(X, M, Xv, Mv).sum(axis=1)
     dV = F / M
     dX = V
@@ -220,7 +235,7 @@ anim = animation.FuncAnimation(
     fig,
     animate,
     init_func=lambda: animate(0),
-    frames=range(2, len(X), 500),
+    frames=range(2, len(X), 1000),
     interval=20,
     blit=True,
 )
@@ -229,4 +244,4 @@ anim = animation.FuncAnimation(
 plt.show()
 
 print("Saving animation...")
-anim.save("animation.gif", writer="imagemagick")
+anim.save("animation_toroidal.mp4", writer="ffmpeg")

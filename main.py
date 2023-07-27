@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax.experimental import ode
 from matplotlib import animation, rc
+import numpy as np
 
 # set jax to double precision
 jax.config.update("jax_enable_x64", True)
@@ -20,7 +21,8 @@ kx, kv, km = jax.random.split(seed, 3)
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-Tf = 3600.0 * 30.0 * 3  # 3 month
+months = 15
+Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
@@ -35,6 +37,7 @@ V0 = V0.at[:, 2].set(0.0)
 
 # system state
 Y = (X0, V0)
+
 
 # -----------------------------------------------
 # Gravity
@@ -51,7 +54,6 @@ def gravity(
     xb: jnp.ndarray,
     mb: jnp.ndarray,
 ) -> jnp.ndarray:
-
     radius3 = jnp.linalg.norm(xb - xa) ** 3
     f = G * ma * mb * (xb - xa) / radius3
 
@@ -80,6 +82,7 @@ def dY(Y, t):
 # using the 4th order Runge-Kutta method. The returned X and V values
 # have a the shape (time, bodies, dimensions)
 (X, V) = ode.odeint(dY, Y, T)
+X, V = np.asarray(X), np.asarray(V)
 
 
 # -----------------------------------------------
@@ -100,8 +103,9 @@ scatter = ax.scatter(X[0, :, 0], X[0, :, 1])
 
 
 def animate(i):
+    i0 = max(0, i - 100_000)
     for j in range(N_BODIES):
-        lines[j].set_data(X[:i, j, 0], X[:i, j, 1])
+        lines[j].set_data(X[i0:i, j, 0], X[i0:i, j, 1])
 
     scatter.set_offsets(X[i, :, :2])
 
@@ -112,7 +116,7 @@ anim = animation.FuncAnimation(
     fig,
     animate,
     init_func=lambda: animate(0),
-    frames=range(0, len(X), 500),
+    frames=range(2, len(X), 1000),
     interval=20,
     blit=True,
 )
@@ -121,4 +125,4 @@ anim = animation.FuncAnimation(
 plt.show()
 
 print("Saving animation...")
-anim.save("animation.gif", writer="imagemagick")
+anim.save("animation.mp4", writer="ffmpeg")

@@ -2,7 +2,7 @@
 This repo contains a demo of how to use JAX to create a simple gravity simulation. The script `main.py` uses JAX's experimental `ode` package to solve the differential equation.
 
 <video controls autoplay muted>
-  <source src="animation.mp4" type="video/mp4">
+  <source src="https://raw.githubusercontent.com/cgarciae/jax-gravity/main/animation.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -14,7 +14,7 @@ A toroidal topology can be represented by tessellating a rectangle into an infin
 
 
 <video controls autoplay muted>
-  <source src="animation_toroidal.mp4" type="video/mp4">
+  <source src="https://raw.githubusercontent.com/cgarciae/jax-gravity/main/animation_toroidal.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 

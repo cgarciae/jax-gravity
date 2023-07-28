@@ -27,7 +27,7 @@ kx, kv, km = jax.random.split(seed, 3)
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 1
+months = 15
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
@@ -68,8 +68,8 @@ def polar_to_toroid(theta, phi):
 
 
 def cartesian_to_polar(x, y):
-    theta = x / L * 2 * np.pi
-    phi = y / L * 2 * np.pi
+    theta = y / L * 2 * np.pi + np.pi
+    phi = x / L * 2 * np.pi + np.pi
     return theta, phi
 
 
@@ -223,7 +223,7 @@ X, V = np.asarray(X), np.asarray(V)
 # of the system. The animate function iteratively updates some lines and scatter
 # plots.
 
-fig = plt.figure(figsize=(10, 10))
+fig = plt.figure(figsize=(10, 20))
 
 ## Plot toroidal topology
 
@@ -236,7 +236,7 @@ theta, phi = np.meshgrid(theta, phi)
 x, y, z = polar_to_toroid(theta, phi)
 
 
-ax1 = fig.add_subplot(121, projection="3d")
+ax1 = fig.add_subplot(211, projection="3d")
 ax1.set_zlim(-1, 1)
 ax1.set_xlim(-3, 3)
 ax1.plot_surface(
@@ -255,18 +255,24 @@ ax1.view_init(36, 26)
 
 ax1.axis("off")
 
-theta, phi = cartesian_to_polar(X[0, :, 0], X[0, :, 1])
-scatter_toroid = ax1.scatter(*polar_to_toroid(theta, phi), c="k", s=10)
+scatter_toroid = ax1.scatter(
+    *polar_to_toroid(*cartesian_to_polar(X[0, :, 0], X[0, :, 1]))
+)
+
+lines_toroid = tuple(
+    ax1.plot(*polar_to_toroid(*cartesian_to_polar(X[:0, j, 0], X[:0, j, 1])))[0]
+    for j in range(N_BODIES)
+)
 
 
 ## Plot Cartesian
 
-ax = fig.add_subplot(122)
+ax = fig.add_subplot(212)
 ax.axis("off")
 ax.set_xlim(0, L)
 ax.set_ylim(0, L)
 
-lines = tuple([ax.plot(X[:0, j, 0], X[:0, j, 1])[0] for j in range(N_BODIES)])
+lines = tuple(ax.plot(X[:0, j, 0], X[:0, j, 1])[0] for j in range(N_BODIES))
 scatter = ax.scatter(X[0, :, 0], X[0, :, 1])
 
 
@@ -277,12 +283,16 @@ def animate(i):
         d = np.linalg.norm(Xj[:-1] - Xj[1:], axis=1)
         Xj = np.where(d[:, None] > L / 2, np.nan, Xj[:-1])
         lines[j].set_data(Xj[:, 0], Xj[:, 1])
+        lines_toroid[j]._verts3d = polar_to_toroid(
+            *cartesian_to_polar(Xj[:, 0], Xj[:, 1])
+        )
 
     scatter.set_offsets(X[i, :, :2])
-    phi, theta = cartesian_to_polar(X[i, :, 0], X[i, :, 1])
-    scatter_toroid.set_offsets(np.stack(polar_to_toroid(phi, theta), axis=-1))
+    scatter_toroid._offsets3d = polar_to_toroid(
+        *cartesian_to_polar(X[i, :, 0], X[i, :, 1])
+    )
 
-    return lines + (scatter, scatter_toroid)
+    return lines + lines_toroid + (scatter, scatter_toroid)
 
 
 anim = animation.FuncAnimation(
@@ -291,7 +301,7 @@ anim = animation.FuncAnimation(
     init_func=lambda: animate(0),
     frames=range(2, len(X), 1000),
     interval=20,
-    blit=True,
+    blit=False,
 )
 
 

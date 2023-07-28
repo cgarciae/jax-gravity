@@ -29,17 +29,19 @@ kx, kv, km = jax.random.split(key, 3)
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 30
+months = 10
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
 L: float = 4 * 748e7
-grid_radius = 4
+grid_radius = 3
 plot_field = False
 toroid_rstride = 5
 toroid_cstride = 5
 initial_speed = 1e5
+max_speed = 1e7
+max_force = 1e35
 
 # Initial Values
 X0 = jax.random.uniform(kx, shape=(N_BODIES, 3), minval=L / 4, maxval=L * 3 / 4)
@@ -100,7 +102,7 @@ def gravity(
     f = G * ma * mb * (xb - xa) / radius3
     # fill nan values with 0s
     f = jnp.nan_to_num(f)
-    f = clip_by_norm(f, 1e40)
+    f = clip_by_norm(f, max_force)
     return f
 
 
@@ -124,7 +126,7 @@ def virtual_particles(X, M, R: int):
 def boundary_conditions(Y) -> Any:
     X, V = Y
     X = jnp.mod(X, L)  # toroidal topology
-    V = clip_by_norm(V, 1e6)  # clip velocity
+    V = clip_by_norm(V, max_speed)  # clip velocity
     return X, V
 
 
@@ -357,12 +359,14 @@ json.dump(
         initial_speed=initial_speed,
         L=L,
         N_BODIES=N_BODIES,
+        max_speed=max_speed,
+        max_force=max_force,
     ),
     (path / "config.json").open("w"),
 )
 
-create_animation(projection=True, cartesian=True, format="mp4", show=False)
 create_animation(projection=True, cartesian=False, format="mp4", show=False)
+create_animation(projection=True, cartesian=True, format="mp4", show=False)
 create_animation(projection=False, cartesian=True, format="mp4", show=False)
 create_animation(projection=True, cartesian=True, format="gif", show=False)
 create_animation(projection=True, cartesian=False, format="gif", show=False)

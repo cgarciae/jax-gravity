@@ -3,14 +3,12 @@ In this script we are going to create a gravitational simulation of N bodies usi
 We will use the jax.experimental.ode package to solve the ODE system.
 """
 from functools import partial
-from math import exp
 from typing import Any, TypeVar
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from jax.experimental import ode
-from matplotlib import animation, rc
+from matplotlib import animation
 from diffrax import ODETerm, Tsit5
 import numpy as np
 
@@ -27,7 +25,7 @@ kx, kv, km = jax.random.split(seed, 3)
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 15
+months = 30
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
@@ -223,89 +221,116 @@ X, V = np.asarray(X), np.asarray(V)
 # of the system. The animate function iteratively updates some lines and scatter
 # plots.
 
-fig = plt.figure(figsize=(10, 20))
 
-## Plot toroidal topology
+def create_animation(projection: bool, cartesian: bool, format: str, show: bool):
+    assert projection or cartesian
 
-n = 100
+    h = 20 if projection and cartesian else 10
+    fig = plt.figure(figsize=(10, h))
 
-theta = np.linspace(0, 2.0 * np.pi, n)
-phi = np.linspace(0, 2.0 * np.pi, n)
-theta, phi = np.meshgrid(theta, phi)
+    ## Plot toroidal topology
+    if projection:
+        n = 50
+        theta = np.linspace(0, 2.0 * np.pi, n)
+        phi = np.linspace(0, 2.0 * np.pi, n)
+        theta, phi = np.meshgrid(theta, phi)
 
-x, y, z = polar_to_toroid(theta, phi)
+        x, y, z = polar_to_toroid(theta, phi)
 
+        subplot_pos = 211 if cartesian else 111
+        ax_toroid = fig.add_subplot(subplot_pos, projection="3d")
+        ax_toroid.set_zlim(-1, 1)
+        ax_toroid.set_xlim(-3, 3)
+        ax_toroid.plot_surface(
+            x,
+            y,
+            z,
+            rstride=10,
+            cstride=5,
+            color="w",
+            edgecolors="k",
+            alpha=0,
+            linewidths=0.5,
+            linestyle=":",
+        )
+        ax_toroid.view_init(36, 26)
+        ax_toroid.axis("off")
 
-ax1 = fig.add_subplot(211, projection="3d")
-ax1.set_zlim(-1, 1)
-ax1.set_xlim(-3, 3)
-ax1.plot_surface(
-    x,
-    y,
-    z,
-    rstride=10,
-    cstride=5,
-    color="w",
-    edgecolors="k",
-    alpha=0,
-    linewidths=0.5,
-    linestyle=":",
-)
-ax1.view_init(36, 26)
-
-ax1.axis("off")
-
-scatter_toroid = ax1.scatter(
-    *polar_to_toroid(*cartesian_to_polar(X[0, :, 0], X[0, :, 1]))
-)
-
-lines_toroid = tuple(
-    ax1.plot(*polar_to_toroid(*cartesian_to_polar(X[:0, j, 0], X[:0, j, 1])))[0]
-    for j in range(N_BODIES)
-)
-
-
-## Plot Cartesian
-
-ax = fig.add_subplot(212)
-ax.axis("off")
-ax.set_xlim(0, L)
-ax.set_ylim(0, L)
-
-lines = tuple(ax.plot(X[:0, j, 0], X[:0, j, 1])[0] for j in range(N_BODIES))
-scatter = ax.scatter(X[0, :, 0], X[0, :, 1])
-
-
-def animate(i):
-    i0 = max(0, i - 100_000)
-    for j in range(N_BODIES):
-        Xj = X[i0:i, j]
-        d = np.linalg.norm(Xj[:-1] - Xj[1:], axis=1)
-        Xj = np.where(d[:, None] > L / 2, np.nan, Xj[:-1])
-        lines[j].set_data(Xj[:, 0], Xj[:, 1])
-        lines_toroid[j]._verts3d = polar_to_toroid(
-            *cartesian_to_polar(Xj[:, 0], Xj[:, 1])
+        scatter_toroid = ax_toroid.scatter(
+            *polar_to_toroid(*cartesian_to_polar(X[0, :, 0], X[0, :, 1]))
         )
 
-    scatter.set_offsets(X[i, :, :2])
-    scatter_toroid._offsets3d = polar_to_toroid(
-        *cartesian_to_polar(X[i, :, 0], X[i, :, 1])
+        lines_toroid = tuple(
+            ax_toroid.plot(
+                *polar_to_toroid(*cartesian_to_polar(X[:0, j, 0], X[:0, j, 1]))
+            )[0]
+            for j in range(N_BODIES)
+        )
+    if cartesian:
+        ## Plot Cartesian
+        subplot_pos = 212 if projection else 111
+        ax_cartesian = fig.add_subplot(subplot_pos)
+        ax_cartesian.axis("off")
+        ax_cartesian.set_xlim(0, L)
+        ax_cartesian.set_ylim(0, L)
+
+        lines_cartesian = tuple(
+            ax_cartesian.plot(X[:0, j, 0], X[:0, j, 1])[0] for j in range(N_BODIES)
+        )
+        scatter_cartesian = ax_cartesian.scatter(X[0, :, 0], X[0, :, 1])
+
+    def animate(i):
+        i0 = max(0, i - 100_000)
+        for j in range(N_BODIES):
+            Xj = X[i0:i, j]
+            d = np.linalg.norm(Xj[:-1] - Xj[1:], axis=1)
+            Xj = np.where(d[:, None] > L / 2, np.nan, Xj[:-1])
+
+            if cartesian:
+                lines_cartesian[j].set_data(Xj[:, 0], Xj[:, 1])
+            if projection:
+                lines_toroid[j]._verts3d = polar_to_toroid(
+                    *cartesian_to_polar(Xj[:, 0], Xj[:, 1])
+                )
+
+        if cartesian:
+            scatter_cartesian.set_offsets(X[i, :, :2])
+        if projection:
+            scatter_toroid._offsets3d = polar_to_toroid(
+                *cartesian_to_polar(X[i, :, 0], X[i, :, 1])
+            )
+
+        plots = ()
+
+        if cartesian:
+            plots += lines_cartesian + (scatter_cartesian,)
+        if projection:
+            plots += lines_toroid + (scatter_toroid,)
+
+        return plots
+
+    anim = animation.FuncAnimation(
+        fig,
+        animate,
+        init_func=lambda: animate(0),
+        frames=range(2, len(X), 1000),
+        interval=20,
+        blit=False,
     )
 
-    return lines + lines_toroid + (scatter, scatter_toroid)
+    if show:
+        plt.show()
+
+    print("Saving animation...")
+    if projection and cartesian:
+        name = "projection_and_cartesian"
+    elif projection:
+        name = "projection"
+    else:
+        name = "cartesian"
+    anim.save(f"toroidal_{name}.{format}", writer="ffmpeg")
 
 
-anim = animation.FuncAnimation(
-    fig,
-    animate,
-    init_func=lambda: animate(0),
-    frames=range(2, len(X), 1000),
-    interval=20,
-    blit=False,
-)
-
-
-plt.show()
-
-print("Saving animation...")
-anim.save("animation_toroidal.gif", writer="ffmpeg")
+create_animation(projection=True, cartesian=True, format="mp4", show=True)
+create_animation(projection=True, cartesian=False, format="mp4", show=False)
+create_animation(projection=False, cartesian=True, format="mp4", show=False)

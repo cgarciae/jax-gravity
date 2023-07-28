@@ -3,6 +3,9 @@ In this script we are going to create a gravitational simulation of N bodies usi
 We will use the jax.experimental.ode package to solve the ODE system.
 """
 from functools import partial
+import json
+from pathlib import Path
+import time
 from typing import Any, TypeVar
 
 import jax
@@ -19,8 +22,9 @@ jax.config.update("jax_enable_x64", True)
 A = TypeVar("A")
 
 # RNG keys
-seed = jax.random.PRNGKey(2)
-kx, kv, km = jax.random.split(seed, 3)
+seed = 42
+key = jax.random.PRNGKey(seed)
+kx, kv, km = jax.random.split(key, 3)
 
 # Simulation Parameters
 N_BODIES = 3
@@ -31,16 +35,22 @@ DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
 L: float = 4 * 748e7
-grid_radius = 1
+grid_radius = 4
 plot_field = False
+toroid_rstride = 5
+toroid_cstride = 5
+initial_speed = 1e5
 
 # Initial Values
 X0 = jax.random.uniform(kx, shape=(N_BODIES, 3), minval=L / 4, maxval=L * 3 / 4)
-V0 = jax.random.uniform(kv, shape=(N_BODIES, 3), minval=-1e5, maxval=1e5)
+V0 = jax.random.uniform(
+    kv, shape=(N_BODIES, 3), minval=-initial_speed, maxval=initial_speed
+)
 M = jax.random.uniform(km, shape=(N_BODIES, 1), minval=5.972e27, maxval=1.898e30)
 # ignore z-axis
 X0 = X0.at[:, 2].set(0.0)
 V0 = V0.at[:, 2].set(0.0)
+date = str(int(time.time()))
 
 # system state
 Y = (X0, V0)
@@ -245,8 +255,8 @@ def create_animation(projection: bool, cartesian: bool, format: str, show: bool)
             x,
             y,
             z,
-            rstride=10,
-            cstride=5,
+            rstride=toroid_rstride,
+            cstride=toroid_cstride,
             color="w",
             edgecolors="k",
             alpha=0,
@@ -321,16 +331,39 @@ def create_animation(projection: bool, cartesian: bool, format: str, show: bool)
     if show:
         plt.show()
 
-    print("Saving animation...")
     if projection and cartesian:
         name = "projection_and_cartesian"
     elif projection:
         name = "projection"
     else:
         name = "cartesian"
-    anim.save(f"toroidal_{name}.{format}", writer="ffmpeg")
+
+    name = f"{path}/toroidal_{name}.{format}"
+
+    print(f"Saving animation '{name}'...")
+    anim.save(name, writer="ffmpeg")
 
 
-create_animation(projection=True, cartesian=True, format="mp4", show=True)
+path = Path("output") / date
+path.mkdir(parents=True, exist_ok=True)
+
+json.dump(
+    dict(
+        grid_radius=grid_radius,
+        months=months,
+        seed=seed,
+        toroid_rstride=toroid_rstride,
+        toroid_cstride=toroid_cstride,
+        initial_speed=initial_speed,
+        L=L,
+        N_BODIES=N_BODIES,
+    ),
+    (path / "config.json").open("w"),
+)
+
+create_animation(projection=True, cartesian=True, format="mp4", show=False)
 create_animation(projection=True, cartesian=False, format="mp4", show=False)
 create_animation(projection=False, cartesian=True, format="mp4", show=False)
+create_animation(projection=True, cartesian=True, format="gif", show=False)
+create_animation(projection=True, cartesian=False, format="gif", show=False)
+create_animation(projection=False, cartesian=True, format="gif", show=False)

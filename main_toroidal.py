@@ -27,7 +27,7 @@ kx, kv, km = jax.random.split(seed, 3)
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 15
+months = 1
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
@@ -56,6 +56,21 @@ def clip_by_norm(x, norm):
     x_norm = jnp.linalg.norm(x, axis=-1, ord=2, keepdims=True)
     clipped_x = jnp.where(x_norm > norm, x / x_norm * norm, x)
     return clipped_x
+
+
+def polar_to_toroid(theta, phi):
+    c, a = 2, 1
+    x = (c + a * np.cos(theta)) * np.cos(phi)
+    y = (c + a * np.cos(theta)) * np.sin(phi)
+    z = a * np.sin(theta)
+
+    return x, y, z
+
+
+def cartesian_to_polar(x, y):
+    theta = x / L * 2 * np.pi
+    phi = y / L * 2 * np.pi
+    return theta, phi
 
 
 # -----------------------------------------------
@@ -208,8 +223,45 @@ X, V = np.asarray(X), np.asarray(V)
 # of the system. The animate function iteratively updates some lines and scatter
 # plots.
 
-fig, ax = plt.subplots()
+fig = plt.figure(figsize=(10, 10))
 
+## Plot toroidal topology
+
+n = 100
+
+theta = np.linspace(0, 2.0 * np.pi, n)
+phi = np.linspace(0, 2.0 * np.pi, n)
+theta, phi = np.meshgrid(theta, phi)
+
+x, y, z = polar_to_toroid(theta, phi)
+
+
+ax1 = fig.add_subplot(121, projection="3d")
+ax1.set_zlim(-1, 1)
+ax1.set_xlim(-3, 3)
+ax1.plot_surface(
+    x,
+    y,
+    z,
+    rstride=10,
+    cstride=5,
+    color="w",
+    edgecolors="k",
+    alpha=0,
+    linewidths=0.5,
+    linestyle=":",
+)
+ax1.view_init(36, 26)
+
+ax1.axis("off")
+
+theta, phi = cartesian_to_polar(X[0, :, 0], X[0, :, 1])
+scatter_toroid = ax1.scatter(*polar_to_toroid(theta, phi), c="k", s=10)
+
+
+## Plot Cartesian
+
+ax = fig.add_subplot(122)
 ax.axis("off")
 ax.set_xlim(0, L)
 ax.set_ylim(0, L)
@@ -227,8 +279,10 @@ def animate(i):
         lines[j].set_data(Xj[:, 0], Xj[:, 1])
 
     scatter.set_offsets(X[i, :, :2])
+    phi, theta = cartesian_to_polar(X[i, :, 0], X[i, :, 1])
+    scatter_toroid.set_offsets(np.stack(polar_to_toroid(phi, theta), axis=-1))
 
-    return lines + (scatter,)
+    return lines + (scatter, scatter_toroid)
 
 
 anim = animation.FuncAnimation(

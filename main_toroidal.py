@@ -2,11 +2,10 @@
 In this script we are going to create a gravitational simulation of N bodies using JAX.
 We will use the jax.experimental.ode package to solve the ODE system.
 """
-from functools import partial
 import json
 from pathlib import Path
 import time
-from typing import Any, TypeVar
+import typing as tp
 
 import jax
 import jax.numpy as jnp
@@ -14,12 +13,20 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from diffrax import ODETerm, Tsit5
 import numpy as np
+import utils
 
 # set jax to double precision
 jax.config.update("jax_enable_x64", True)
 
 # type aliases
-A = TypeVar("A")
+A = tp.TypeVar("A")
+
+
+class Body(tp.NamedTuple):
+    x: jax.Array
+    v: jax.Array
+    m: jax.Array
+
 
 # RNG keys
 seed = 42
@@ -27,14 +34,14 @@ key = jax.random.PRNGKey(seed)
 kx, kv, km = jax.random.split(key, 3)
 
 # Simulation Parameters
-N_BODIES = 3
+N_BODIES = 5
 T0 = 0.0
-months = 10
+months = 30
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
-L: float = 4 * 748e7
+L: float = 8 * 748e7
 grid_radius = 3
 plot_field = False
 toroid_rstride = 5
@@ -55,7 +62,7 @@ V0 = V0.at[:, 2].set(0.0)
 date = str(int(time.time()))
 
 # system state
-Y = (X0, V0)
+Y = Body(X0, V0, M)
 
 # -----------------------------------------------
 # Utils
@@ -90,44 +97,42 @@ def cartesian_to_polar(x, y):
 # but use vmap twice automatically perform broadcasting for us:
 # we alternate which bodies bodies we are slicing and which we are replicating
 # to construct the full matrix of interactions.
-@partial(jax.vmap, in_axes=(0, 0, None, None))
-@partial(jax.vmap, in_axes=(None, None, 0, 0))
-def gravity(
-    xa: jnp.ndarray,
-    ma: jnp.ndarray,
-    xb: jnp.ndarray,
-    mb: jnp.ndarray,
-) -> jnp.ndarray:
-    radius3 = jnp.linalg.norm(xb - xa) ** 3
-    f = G * ma * mb * (xb - xa) / radius3
+def gravitational_force(a: Body, b: Body) -> jax.Array:
+    radius3 = utils.safe_norm(b.x, a.x) ** 3
+    f = G * b.m * (b.x - a.x) / radius3
     # fill nan values with 0s
-    f = jnp.nan_to_num(f)
-    f = clip_by_norm(f, max_force)
-    return f
+    return jnp.nan_to_num(f)
+
+
+def gravitational_energy(a: Body, b: Body) -> jax.Array:
+    r = utils.safe_norm(a.x, b.x)
+    energy = -G * b.m / r
+    energy = jnp.where(jnp.allclose(a.x, b.x), 0.0, energy)
+    return energy
 
 
 # -----------------------------------------------
 # Toroidal Topology
 # -----------------------------------------------
-def virtual_particles(X, M, R: int):
+def virtual_particles(a: Body, R: int) -> Body:
     space = jnp.linspace(-L * R, L * R, 2 * R + 1)
     xx, yy = jnp.meshgrid(space, space)
     zz = jnp.zeros_like(xx)
     Xgrid = jnp.stack([xx, yy, zz], axis=-1).reshape(-1, 3)
 
-    X = X[None] + Xgrid[:, None]
-    X = X.reshape(-1, 3)
+    x = a.x[None] + Xgrid[:, None]
+    x = x.reshape(-1, 3)
 
-    M = jnp.concatenate([M] * (2 * R + 1) ** 2)
+    m = jnp.concatenate([a.m] * (2 * R + 1) ** 2)
+    v = jnp.concatenate([a.v] * (2 * R + 1) ** 2)
 
-    return X, M
+    return Body(x=x, v=v, m=m)
 
 
-def boundary_conditions(Y) -> Any:
-    X, V = Y
-    X = jnp.mod(X, L)  # toroidal topology
-    V = clip_by_norm(V, max_speed)  # clip velocity
-    return X, V
+def boundary_conditions(a: Body) -> Body:
+    x = jnp.mod(a.x, L)  # toroidal topology
+    v = clip_by_norm(a.v, max_speed)  # clip velocity
+    return Body(x=x, v=v, m=a.m)
 
 
 def gravitation_field(x, m, n, grid_radius):
@@ -139,16 +144,18 @@ def gravitation_field(x, m, n, grid_radius):
     xx, yy = jnp.meshgrid(xs, ys)
     Xgrid = jnp.stack([xx, yy, jnp.zeros_like(xx)], axis=-1).reshape(-1, 3)
     Mgrid = jnp.full(Xgrid.shape[0:1], m0)
+    grid = Body(x=Xgrid, v=jnp.zeros_like(Xgrid), m=Mgrid)
 
-    x, m = virtual_particles(x, m, grid_radius)
+    a = Body(x=x, v=jnp.zeros_like(x), m=m)
+    virtual = virtual_particles(a, grid_radius)
 
-    F = gravity(Xgrid, Mgrid, x, m).sum(axis=1)
+    force = gravitational_force(grid, virtual).sum(axis=1)
     # add field from virtual particles
     # F = F.reshape(-1, 9, 3).sum(axis=1)
     # remove z-component
-    F = F[:, :2]
+    force = force[:, :2]
 
-    return xx, yy, F.reshape(*xx.shape, 2)
+    return xx, yy, force.reshape(*xx.shape, 2)
 
 
 # plot gravitational field
@@ -181,13 +188,12 @@ if plot_field:
 # Here we use the gravity function to calculate calculated the acceleration
 # which is the derivative of the velocity (dV), the derivative of the position
 # is just the velocity (dX). Notice how the state is conveniently a pytree tuple :)
-def dY(t, Y, args):
-    X, V = Y
-    Xv, Mv = virtual_particles(X, M, grid_radius)
-    F = gravity(X, M, Xv, Mv).sum(axis=1)
-    dV = F / M
-    dX = V
-    return dX, dV
+def dY(t, y: Body, args):
+    virtual = virtual_particles(y, grid_radius)
+    force = utils.map_product(gravitational_force)(y, virtual).sum(axis=1)
+    dV = force
+    dX = y.v
+    return Body(x=dX, v=dV, m=jnp.zeros_like(y.m))
 
 
 # -----------------------------------------------
@@ -198,7 +204,7 @@ def dY(t, Y, args):
 # have a the shape (time, bodies, dimensions)
 
 
-def odeint(f, y0: A, t) -> A:
+def odeint(f, y0: Body, t) -> Body:
     term = ODETerm(f)
     solver = Tsit5()
 
@@ -223,8 +229,9 @@ def odeint(f, y0: A, t) -> A:
     return y
 
 
-(X, V) = odeint(dY, Y, T)
-X, V = np.asarray(X), np.asarray(V)
+Y = odeint(dY, Y, T)
+Y = jax.tree_map(np.asarray, Y)
+X = Y.x
 
 # -----------------------------------------------
 # Create animation
@@ -234,7 +241,9 @@ X, V = np.asarray(X), np.asarray(V)
 # plots.
 
 
-def create_animation(projection: bool, cartesian: bool, format: str, show: bool):
+def create_animation(
+    projection: bool, cartesian: bool, format: tp.Optional[str], show: bool
+):
     assert projection or cartesian
 
     h = 20 if projection and cartesian else 10
@@ -333,17 +342,18 @@ def create_animation(projection: bool, cartesian: bool, format: str, show: bool)
     if show:
         plt.show()
 
-    if projection and cartesian:
-        name = "projection_and_cartesian"
-    elif projection:
-        name = "projection"
-    else:
-        name = "cartesian"
+    if format is not None:
+        if projection and cartesian:
+            name = "projection_and_cartesian"
+        elif projection:
+            name = "projection"
+        else:
+            name = "cartesian"
 
-    name = f"{path}/toroidal_{name}.{format}"
+        name = f"{path}/toroidal_{name}.{format}"
 
-    print(f"Saving animation '{name}'...")
-    anim.save(name, writer="ffmpeg")
+        print(f"Saving animation '{name}'...")
+        anim.save(name, writer="ffmpeg")
 
 
 path = Path("output") / date
@@ -365,9 +375,7 @@ json.dump(
     (path / "config.json").open("w"),
 )
 
-create_animation(projection=True, cartesian=False, format="mp4", show=False)
-create_animation(projection=True, cartesian=True, format="mp4", show=False)
-create_animation(projection=False, cartesian=True, format="mp4", show=False)
-create_animation(projection=True, cartesian=True, format="gif", show=False)
-create_animation(projection=True, cartesian=False, format="gif", show=False)
-create_animation(projection=False, cartesian=True, format="gif", show=False)
+create_animation(projection=True, cartesian=False, format=None, show=False)
+# create_animation(projection=True, cartesian=False, format="mp4", show=False)
+# create_animation(projection=True, cartesian=True, format="mp4", show=False)
+# create_animation(projection=False, cartesian=True, format="mp4", show=False)

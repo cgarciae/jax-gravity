@@ -8,45 +8,38 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax.experimental import ode
-from matplotlib import animation, rc
+from matplotlib import animation
 import numpy as np
-import typing as tp
-import utils
-
 
 # set jax to double precision
 jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_debug_nans", True)
 
 # RNG keys
 seed = jax.random.PRNGKey(42)
 kx, kv, km = jax.random.split(seed, 3)
 
-
-class Body(tp.NamedTuple):
-    x: jax.Array
-    v: jax.Array
-    m: jax.Array
-
-
 # Simulation Parameters
 N_BODIES = 3
 T0 = 0.0
-months = 2
+months = 15
 Tf = 3600.0 * 30.5 * months  # in seconds
 DT = 1.0  # 1 second
 T = jnp.arange(T0, Tf, DT)
+# T = jnp.arange(T0, T0 + DT * 10000, DT)
 G = jnp.array(6.67408e-11, dtype=jnp.float32)
 
 # Initial Values
 X0 = jax.random.uniform(kx, shape=(N_BODIES, 3), minval=-748e7, maxval=748e7)
 V0 = jax.random.uniform(kv, shape=(N_BODIES, 3), minval=-1e5, maxval=1e5)
 M = jax.random.uniform(km, shape=(N_BODIES, 1), minval=5.972e27, maxval=1.898e30)
+M = M[:, 0]
 # ignore z-axis
 X0 = X0.at[:, 2].set(0.0)
 V0 = V0.at[:, 2].set(0.0)
 
 # system state
-Y: Body = Body(X0, V0, M)
+Y = (X0, V0)
 
 
 # -----------------------------------------------
@@ -56,17 +49,15 @@ Y: Body = Body(X0, V0, M)
 # but use vmap twice automatically perform broadcasting for us:
 # we alternate which bodies bodies we are slicing and which we are replicating
 # to construct the full matrix of interactions.
-def gravitational_force(a: Body, b: Body) -> jax.Array:
-    radius3 = utils.safe_norm(b.x, a.x) ** 3
-    f = G * b.m * (b.x - a.x) / radius3
-    # fill nan values with 0s
-    return jnp.nan_to_num(f)
-
-
-def gravitational_energy(a: Body, b: Body) -> jax.Array:
-    r = utils.safe_norm(a.x, b.x)
-    energy = -G * b.m / r
-    energy = jnp.where(jnp.allclose(a.x, b.x), 0.0, energy)
+def gravitational_energy(
+    a: tuple[jax.Array, jax.Array],
+    b: tuple[jax.Array, jax.Array],
+) -> jax.Array:
+    xa, ma = a
+    xb, mb = b
+    r = safe_norm(xa, xb)
+    energy = -G * mb / r
+    energy = jnp.where(jnp.allclose(xa, xb), 0.0, energy)
     return energy
 
 
@@ -76,15 +67,28 @@ def gravitational_energy(a: Body, b: Body) -> jax.Array:
 # Here we use the gravity function to calculate calculated the acceleration
 # which is the derivative of the velocity (dV), the derivative of the position
 # is just the velocity (dX). Notice how the state is conveniently a pytree tuple :)
-def dY(Y: Body, t):
-    F = utils.map_product(gravitational_force)(Y, Y).sum(axis=1)
-    F2 = -jax.grad(lambda a, b: utils.map_product(gravitational_energy)(a, b).sum())(
-        Y, Y
-    ).x
-    jax.debug.print("norm_F={n}", n=jnp.linalg.norm(F - F2, ord=1))
+
+
+def force_fn(a: tuple[jax.Array, jax.Array]) -> jax.Array:
+    def total_energey(a, b):
+        return -0.5 * map_product(gravitational_energy)(a, b).sum()
+
+    return jax.grad(total_energey)(a, a)[0]
+
+
+def force_fn2(a: tuple[jax.Array, jax.Array]) -> jax.Array:
+    force = -map_product(jax.grad(gravitational_energy))(a, a)[0]
+    return 2 * mask_diagonal(force).sum(axis=1)
+
+
+def dY(Y, t):
+    X, V = Y
+
+    # F =
+    F = force_fn2((X, M))
     dV = F
-    dX = Y.v
-    return Body(dX, dV, jnp.zeros_like(M))
+    dX = V
+    return dX, dV
 
 
 # -----------------------------------------------
@@ -93,8 +97,8 @@ def dY(Y: Body, t):
 # We call `odeint` which solves the system of differential equations
 # using the 4th order Runge-Kutta method. The returned X and V values
 # have a the shape (time, bodies, dimensions)
-Y = ode.odeint(dY, Y, T)
-Y = jax.tree_map(np.asarray, Y)
+(X, V) = ode.odeint(dY, Y, T)
+X, V = np.asarray(X), np.asarray(V)
 
 
 # -----------------------------------------------
@@ -104,7 +108,6 @@ Y = jax.tree_map(np.asarray, Y)
 # of the system. The animate function iteratively updates some lines and scatter
 # plots.
 
-X = Y.x
 fig, ax = plt.subplots()
 
 ax.axis("off")
@@ -138,4 +141,4 @@ anim = animation.FuncAnimation(
 plt.show()
 
 print("Saving animation...")
-anim.save("animation.gif", writer="ffmpeg")
+# anim.save("animation2.mp4", writer="ffmpeg")

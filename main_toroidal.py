@@ -375,7 +375,7 @@ json.dump(
     (path / "config.json").open("w"),
 )
 
-create_animation(projection=True, cartesian=False, format=None, show=False)
+create_animation(projection=True, cartesian=False, format=None, show=True)
 # create_animation(projection=True, cartesian=False, format="mp4", show=False)
 # create_animation(projection=True, cartesian=True, format="mp4", show=False)
 # create_animation(projection=False, cartesian=True, format="mp4", show=False)

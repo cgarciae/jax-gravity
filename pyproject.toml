@@ -10,6 +10,10 @@ matplotlib = "*"
 jax = "*"
 jaxlib = "*"
 black = {extras = ["jupyter"], version = "^23.7.0"}
+jupyterlab = "^4.0.3"
+sympy = "^1.12"
+ipywidgets = "^8.0.7"
+jupyter = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "23.7.0"
